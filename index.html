@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cutover</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --legacy: #475569;
+    --converting: #3b82f6;
+    --migrated: #22c55e;
+    --mismatch: #f59e0b;
+    --gap: clamp(4px, 1.2vmin, 10px);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+  }
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  h1 { margin: 0; font-size: clamp(22px, 4vh, 34px); letter-spacing: -0.02em; }
+  .hint { color: var(--muted); font-size: 12px; text-align: right; line-height: 1.3; }
+  .scores {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .score {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 6px 8px;
+    min-width: 0;
+  }
+  .score .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.2; }
+  .score .value { font-size: clamp(16px, 3vh, 24px); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .score .value small { font-size: 0.6em; color: var(--muted); font-weight: 500; }
+  .score.urgent .value { color: #f87171; }
+  .grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(6, 1fr);
+    gap: var(--gap);
+  }
+  .tile {
+    position: relative;
+    border: 0;
+    border-radius: 10px;
+    background: var(--legacy);
+    color: #fff;
+    font: inherit;
+    padding: 4px;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: background-color 0.2s, transform 0.1s;
+    touch-action: manipulation;
+  }
+  .tile:active { transform: scale(0.97); }
+  .tile:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .tile .name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 700;
+    font-size: clamp(9px, 2.6vw, 14px);
+    overflow-wrap: anywhere;
+    text-align: center;
+    line-height: 1.1;
+  }
+  .tile .status { font-size: clamp(8px, 2.2vw, 11px); opacity: 0.9; text-align: center; line-height: 1.15; }
+  .tile .tag {
+    position: absolute; top: 3px; right: 4px;
+    font-size: 10px; font-weight: 800;
+    background: rgba(15, 23, 42, 0.55); color: #fde68a;
+    border-radius: 4px; padding: 0 4px; line-height: 14px;
+  }
+  .tile.converting, .tile.fixing { background: var(--converting); cursor: default; }
+  .tile.migrated { background: var(--migrated); cursor: default; }
+  .tile.mismatch { background: var(--mismatch); color: #1f1300; }
+  .tile.mismatch .tag { color: #fde68a; }
+  .ring { display: none; width: clamp(18px, 4vh, 30px); height: clamp(18px, 4vh, 30px); transform: rotate(-90deg); }
+  .tile.converting .ring, .tile.fixing .ring { display: block; }
+  .ring .track { fill: none; stroke: rgba(255,255,255,0.3); stroke-width: 4; }
+  .ring .bar {
+    fill: none; stroke: #fff; stroke-width: 4; stroke-linecap: round;
+    stroke-dasharray: 88; stroke-dashoffset: 88;
+  }
+  .tile.converting .ring .bar, .tile.fixing .ring .bar { animation: fill 1s linear forwards; }
+  .grid.over .ring .bar { animation-play-state: paused; }
+  @keyframes fill { to { stroke-dashoffset: 0; } }
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(2, 6, 23, 0.8);
+    display: none; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .overlay.show { display: flex; }
+  .card {
+    background: var(--panel); border-radius: 16px; padding: 22px;
+    width: min(420px, 100%); text-align: center;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+  .card h2 { margin: 0 0 14px; font-size: 26px; }
+  .card h2.win { color: var(--migrated); }
+  .card h2.lose { color: #f87171; }
+  .card .scores { margin-bottom: 14px; grid-template-columns: repeat(2, 1fr); }
+  .card .summary { margin: 0 0 16px; color: var(--text); line-height: 1.4; }
+  .card button {
+    background: var(--converting); color: #fff; border: 0; border-radius: 10px;
+    font: inherit; font-weight: 700; font-size: 16px; padding: 12px 22px; cursor: pointer;
+  }
+  .card button:hover { filter: brightness(1.1); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Cutover</h1>
+    <div class="hint">Tap a grey table to dispatch a Devin &middot; 1&nbsp;ACU</div>
+  </header>
+  <section class="scores" aria-live="polite">
+    <div class="score"><div class="label">Tables migrated</div><div class="value"><span id="migrated">0</span><small>/24</small></div></div>
+    <div class="score"><div class="label">ACUs spent</div><div class="value"><span id="spent">0</span><small>/32</small></div></div>
+    <div class="score"><div class="label">Mismatches fixed</div><div class="value" id="fixed">0</div></div>
+    <div class="score" id="days-box"><div class="label">Days to renewal</div><div class="value" id="days">90</div></div>
+  </section>
+  <main class="grid" id="grid"></main>
+</div>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="end-headline">
+  <div class="card">
+    <h2 id="end-headline"></h2>
+    <div class="scores">
+      <div class="score"><div class="label">Tables migrated</div><div class="value"><span id="end-migrated">0</span><small>/24</small></div></div>
+      <div class="score"><div class="label">ACUs spent</div><div class="value" id="end-spent">0</div></div>
+      <div class="score"><div class="label">Mismatches fixed</div><div class="value" id="end-fixed">0</div></div>
+      <div class="score"><div class="label">Days to renewal</div><div class="value" id="end-days">0</div></div>
+    </div>
+    <p class="summary" id="end-summary"></p>
+    <button id="play-again" type="button">Play again</button>
+  </div>
+</div>
+
+<script>
+const TABLES = [
+  'CUSTOMER', 'ORDERS', 'INVOICES', 'CLAIMS', 'INVENTORY', 'GL_ENTRIES',
+  'PAYMENTS', 'PRODUCTS', 'SUPPLIERS', 'SHIPMENTS', 'EMPLOYEES', 'POLICIES',
+  'RETURNS', 'STORES', 'REGIONS', 'CONTRACTS', 'VENDORS', 'WAREHOUSES',
+  'PROMOTIONS', 'CAMPAIGNS', 'TICKETS', 'SESSIONS', 'ADDRESSES', 'PRICE_LISTS'
+];
+const FINANCE_TABLES = new Set(['INVOICES', 'PAYMENTS', 'GL_ENTRIES']);
+const STARTING_ACUS = 32;
+const ROUND_DAYS = 90;
+const WORK_MS = 1000;
+const MISMATCH_RATE = 0.2;
+const FINANCE_MISMATCH_RATE = 0.4;
+
+const STATUS_TEXT = {
+  legacy: 'Legacy',
+  converting: 'Converting',
+  fixing: 'Fixing',
+  migrated: 'Migrated'
+};
+
+// Optional ?seed=N makes reconciliation outcomes reproducible for testing.
+const random = (() => {
+  const seed = new URLSearchParams(location.search).get('seed');
+  if (seed === null) return Math.random;
+  let a = Number(seed) >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+})();
+
+const gridEl = document.getElementById('grid');
+const overlayEl = document.getElementById('overlay');
+let state;
+let tileEls = [];
+
+function isFinance(tile) {
+  return FINANCE_TABLES.has(tile.name);
+}
+
+function mismatchText(tile) {
+  return isFinance(tile) ? 'Totals don\u2019t tie to the ledger' : 'Row counts don\u2019t match';
+}
+
+function spendAcu() {
+  state.acusLeft -= 1;
+  state.acusSpent += 1;
+}
+
+function dispatchDevin(i) {
+  const tile = state.tiles[i];
+  if (state.over || tile.status !== 'legacy' || state.acusLeft <= 0) return;
+  spendAcu();
+  tile.status = 'converting';
+  tile.timer = setTimeout(() => reconcile(i), WORK_MS);
+  render();
+}
+
+function reconcile(i) {
+  const tile = state.tiles[i];
+  tile.timer = null;
+  const failRate = isFinance(tile) ? FINANCE_MISMATCH_RATE : MISMATCH_RATE;
+  tile.status = random() < failRate ? 'mismatch' : 'migrated';
+  render();
+  checkGameOver();
+}
+
+function fixMismatch(i) {
+  const tile = state.tiles[i];
+  if (state.over || tile.status !== 'mismatch' || state.acusLeft <= 0) return;
+  spendAcu();
+  tile.status = 'fixing';
+  tile.timer = setTimeout(() => {
+    tile.timer = null;
+    tile.status = 'migrated';
+    state.fixed += 1;
+    render();
+    checkGameOver();
+  }, WORK_MS);
+  render();
+}
+
+function handleTileClick(i) {
+  const status = state.tiles[i].status;
+  if (status === 'legacy') dispatchDevin(i);
+  else if (status === 'mismatch') fixMismatch(i);
+}
+
+function migratedCount() {
+  return state.tiles.filter(t => t.status === 'migrated').length;
+}
+
+function devinsWorking() {
+  return state.tiles.some(t => t.status === 'converting' || t.status === 'fixing');
+}
+
+function checkGameOver() {
+  if (state.over) return;
+  if (migratedCount() === TABLES.length) endGame('win');
+  else if (state.days <= 0) endGame('renewal');
+  else if (state.acusLeft <= 0 && !devinsWorking()) endGame('budget');
+}
+
+function tick() {
+  if (state.over) return;
+  state.days = Math.max(0, state.days - 1);
+  render();
+  checkGameOver();
+}
+
+function endGame(reason) {
+  state.over = true;
+  clearInterval(state.clock);
+  state.tiles.forEach(t => { clearTimeout(t.timer); t.timer = null; });
+  gridEl.classList.add('over');
+
+  const headlines = { win: 'Cutover complete', renewal: 'Renewal hit', budget: 'Budget exhausted' };
+  const headline = document.getElementById('end-headline');
+  headline.textContent = headlines[reason];
+  headline.className = reason === 'win' ? 'win' : 'lose';
+  document.getElementById('end-migrated').textContent = migratedCount();
+  document.getElementById('end-spent').textContent = state.acusSpent;
+  document.getElementById('end-fixed').textContent = state.fixed;
+  document.getElementById('end-days').textContent = state.days;
+  document.getElementById('end-summary').textContent = reason === 'win'
+    ? `Migrated 24 tables with ${state.days} days to spare on ${state.acusSpent} ACUs.`
+    : '';
+  overlayEl.classList.add('show');
+  document.getElementById('play-again').focus();
+}
+
+function buildBoard() {
+  gridEl.innerHTML = '';
+  tileEls = state.tiles.map((tile, i) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'tile';
+    el.innerHTML =
+      (isFinance(tile) ? '<span class="tag" title="Finance table">$</span>' : '') +
+      '<svg class="ring" viewBox="0 0 32 32" aria-hidden="true">' +
+      '<circle class="track" cx="16" cy="16" r="14"/><circle class="bar" cx="16" cy="16" r="14"/></svg>' +
+      `<span class="name">${tile.name}</span><span class="status"></span>`;
+    el.addEventListener('click', () => handleTileClick(i));
+    gridEl.appendChild(el);
+    return el;
+  });
+}
+
+function render() {
+  state.tiles.forEach((tile, i) => {
+    const el = tileEls[i];
+    const text = tile.status === 'mismatch' ? mismatchText(tile) : STATUS_TEXT[tile.status];
+    el.className = `tile ${tile.status}`;
+    el.querySelector('.status').textContent = text;
+    el.setAttribute('aria-label', `${tile.name}: ${text}`);
+  });
+  document.getElementById('migrated').textContent = migratedCount();
+  document.getElementById('spent').textContent = state.acusSpent;
+  document.getElementById('fixed').textContent = state.fixed;
+  document.getElementById('days').textContent = state.days;
+  document.getElementById('days-box').classList.toggle('urgent', state.days <= 15);
+}
+
+function resetGame() {
+  if (state) {
+    clearInterval(state.clock);
+    state.tiles.forEach(t => clearTimeout(t.timer));
+  }
+  state = {
+    tiles: TABLES.map(name => ({ name, status: 'legacy', timer: null })),
+    acusLeft: STARTING_ACUS,
+    acusSpent: 0,
+    fixed: 0,
+    days: ROUND_DAYS,
+    over: false,
+    clock: null
+  };
+  overlayEl.classList.remove('show');
+  gridEl.classList.remove('over');
+  buildBoard();
+  render();
+  state.clock = setInterval(tick, 1000);
+}
+
+document.getElementById('play-again').addEventListener('click', resetGame);
+resetGame();
+</script>
+</body>
+</html>
