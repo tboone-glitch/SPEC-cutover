@@ -324,7 +324,7 @@ function endGame(won, reason) {
 function tick() {
   if (state.over) return;
   state.seconds = Math.max(0, state.seconds - 1);
-  render();
+  renderMeters();
   checkEnd();
 }
 
@@ -346,6 +346,7 @@ function el(tag, className, text) {
 
 function renderRow(row, i) {
   const body = el('tbody', row.status);
+  body.dataset.row = i;
   const tr = el('tr', 'main');
   tr.appendChild(cell(row.name, 'name'));
   tr.appendChild(cell(fmt(row.tdRows), 'num'));
@@ -371,6 +372,7 @@ function renderRow(row, i) {
     btn.type = 'button';
     btn.disabled = state.over || state.acus <= 0;
     btn.setAttribute('aria-label', `Migrate ${row.name} (1 ACU)`);
+    btn.dataset.focus = `m${i}`;
     btn.addEventListener('click', () => migrate(i));
     actionTd.appendChild(btn);
     actionTd.appendChild(el('span', 'cost', ' 1 ACU'));
@@ -395,6 +397,7 @@ function renderRow(row, i) {
       const btn = el('button', 'fix', option.fix);
       btn.type = 'button';
       btn.disabled = state.over || state.acus <= 0;
+      btn.dataset.focus = `f${i}-${k}`;
       btn.addEventListener('click', () => applyFix(i, k));
       fixes.appendChild(btn);
     });
@@ -405,9 +408,31 @@ function renderRow(row, i) {
   return body;
 }
 
+// Rows are rebuilt on every action, so move keyboard focus to the same control
+// if it survived, otherwise to the next enabled button from that row onward.
+function restoreFocus(key, rowIndex) {
+  const exact = tableEl.querySelector(`button[data-focus="${key}"]:not(:disabled)`);
+  if (exact) return exact.focus();
+  const bodies = [...tableEl.querySelectorAll('tbody')];
+  const ordered = bodies.slice(rowIndex).concat(bodies.slice(0, rowIndex));
+  for (const body of ordered) {
+    const btn = body.querySelector('button:not(:disabled)');
+    if (btn) return btn.focus();
+  }
+}
+
 function render() {
+  const active = document.activeElement;
+  const hadFocus = active && tableEl.contains(active) && active.dataset.focus;
+  const focusKey = hadFocus ? active.dataset.focus : null;
+  const focusRow = hadFocus ? Number(active.closest('tbody').dataset.row) : 0;
   tableEl.querySelectorAll('tbody').forEach(b => b.remove());
   state.rows.forEach((row, i) => tableEl.appendChild(renderRow(row, i)));
+  if (focusKey) restoreFocus(focusKey, focusRow);
+  renderMeters();
+}
+
+function renderMeters() {
   document.getElementById('acus').textContent = state.acus;
   document.getElementById('days').textContent = state.seconds;
   document.getElementById('acu-meter').classList.toggle('low', state.acus <= 3);
