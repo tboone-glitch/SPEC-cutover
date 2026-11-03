@@ -2,191 +2,214 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cutover</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teradata to Snowflake cutover</title>
 <style>
   :root {
-    --bg: #0f172a;
-    --panel: #1e293b;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --legacy: #475569;
-    --converting: #3b82f6;
-    --migrated: #22c55e;
-    --mismatch: #f59e0b;
-    --gap: clamp(4px, 1.2vmin, 10px);
+    --bg: #0b0f14;
+    --panel: #111821;
+    --line: #1f2a37;
+    --text: #d1d9e0;
+    --muted: #6b7a8c;
+    --accent: #29b5e8;
+    --ok: #22c55e;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
+  html, body { margin: 0; }
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    -webkit-tap-highlight-color: transparent;
-    overflow: hidden;
+    font: 14px/1.45 var(--mono);
+    min-height: 100vh;
   }
-  .app {
-    height: 100vh;
-    height: 100dvh;
-    max-width: 760px;
-    margin: 0 auto;
-    padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  .app { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 12px 14px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px;
   }
-  header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  h1 { margin: 0; font-size: clamp(22px, 4vh, 34px); letter-spacing: -0.02em; }
-  .hint { color: var(--muted); font-size: 12px; text-align: right; line-height: 1.3; }
-  .scores {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
+  h1 { margin: 0; font-size: 18px; font-weight: 700; color: #fff; }
+  h1::before { content: "$ "; color: var(--accent); }
+  .meters { display: flex; gap: 10px; flex-wrap: wrap; }
+  .meter {
+    border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; min-width: 120px;
   }
-  .score {
-    background: var(--panel);
-    border-radius: 10px;
-    padding: 6px 8px;
-    min-width: 0;
+  .meter .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .meter .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
+  .meter.low .value { color: var(--bad); }
+  .hint { color: var(--muted); margin: 10px 2px; font-size: 12px; }
+  .table-wrap {
+    overflow-x: auto; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px;
   }
-  .score .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.2; }
-  .score .value { font-size: clamp(16px, 3vh, 24px); font-weight: 700; font-variant-numeric: tabular-nums; }
-  .score .value small { font-size: 0.6em; color: var(--muted); font-weight: 500; }
-  .score.urgent .value { color: #f87171; }
-  .grid {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    grid-template-rows: repeat(6, 1fr);
-    gap: var(--gap);
+  table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  th, td { padding: 8px 12px; text-align: left; white-space: nowrap; }
+  th {
+    font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--line); background: #0e141c;
   }
-  .tile {
-    position: relative;
-    border: 0;
-    border-radius: 10px;
-    background: var(--legacy);
-    color: #fff;
-    font: inherit;
-    padding: 4px;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    cursor: pointer;
-    overflow: hidden;
-    transition: background-color 0.2s, transform 0.1s;
-    touch-action: manipulation;
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr.main td { border-top: 1px solid var(--line); }
+  tbody:first-of-type tr.main td { border-top: 0; }
+  td.name { color: #fff; font-weight: 600; }
+  .delta-pos { color: var(--warn); }
+  .delta-zero { color: var(--ok); }
+  .dash { color: var(--muted); }
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 12px; font-weight: 700;
+    border: 1px solid currentColor;
   }
-  .tile:active { transform: scale(0.97); }
-  .tile:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-  .tile .name {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-weight: 700;
-    font-size: clamp(9px, 2.6vw, 14px);
-    overflow-wrap: anywhere;
-    text-align: center;
-    line-height: 1.1;
+  .badge.pending { color: var(--muted); }
+  .badge.ok { color: var(--ok); background: rgba(34, 197, 94, 0.1); }
+  .badge.warn { color: var(--warn); background: rgba(245, 158, 11, 0.1); }
+  tbody.reconciled tr.main td:first-child { box-shadow: inset 3px 0 0 var(--ok); }
+  tbody.failing tr td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+  tbody.failing tr.main td { background: rgba(245, 158, 11, 0.06); }
+  tr.detail td {
+    white-space: normal; background: rgba(245, 158, 11, 0.06); padding-top: 0;
   }
-  .tile .status { font-size: clamp(8px, 2.2vw, 11px); opacity: 0.9; text-align: center; line-height: 1.15; }
-  .tile .tag {
-    position: absolute; top: 3px; right: 4px;
-    font-size: 10px; font-weight: 800;
-    background: rgba(15, 23, 42, 0.55); color: #fde68a;
-    border-radius: 4px; padding: 0 4px; line-height: 14px;
+  .symptom { color: var(--warn); margin-bottom: 4px; }
+  .symptom::before { content: "! "; font-weight: 700; }
+  .log { color: var(--muted); margin-bottom: 6px; }
+  .log::before { content: "log> "; color: var(--accent); }
+  .still { color: var(--bad); font-weight: 700; margin-bottom: 6px; }
+  .fixes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  button {
+    font: inherit; font-size: 12px; cursor: pointer; color: #fff;
+    background: #16222e; border: 1px solid #2b3b4d; border-radius: 4px; padding: 5px 10px;
   }
-  .tile.converting, .tile.fixing { background: var(--converting); cursor: default; }
-  .tile.migrated { background: var(--migrated); cursor: default; }
-  .tile.mismatch { background: var(--mismatch); color: #1f1300; }
-  .tile.mismatch .tag { color: #fde68a; }
-  .ring { display: none; width: clamp(18px, 4vh, 30px); height: clamp(18px, 4vh, 30px); transform: rotate(-90deg); }
-  .tile.converting .ring, .tile.fixing .ring { display: block; }
-  .ring .track { fill: none; stroke: rgba(255,255,255,0.3); stroke-width: 4; }
-  .ring .bar {
-    fill: none; stroke: #fff; stroke-width: 4; stroke-linecap: round;
-    stroke-dasharray: 88; stroke-dashoffset: 88;
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.migrate { border-color: var(--accent); color: var(--accent); }
+  .cost { color: var(--muted); font-size: 11px; }
+  @media (max-width: 640px) {
+    .app { padding: 10px; }
+    table { min-width: 0; }
+    thead { display: none; }
+    tr.main { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 10px 12px 8px; }
+    tbody tr.main td { border-top: 0; }
+    tbody + tbody tr.main { border-top: 1px solid var(--line); }
+    tr.main td { display: block; padding: 0; white-space: normal; }
+    tr.main td::before {
+      content: attr(data-label); display: block;
+      font-size: 10px; color: var(--muted); letter-spacing: 0.06em;
+    }
+    tr.main td.name { grid-column: 1 / -1; font-size: 15px; }
+    tr.main td.name::before { display: none; }
+    td.num { text-align: left; }
+    tr.detail, tr.detail td { display: block; }
+    tr.detail td { padding: 0 12px 10px; }
+    tbody.reconciled tr.main { box-shadow: inset 3px 0 0 var(--ok); }
+    tbody.failing tr { box-shadow: inset 3px 0 0 var(--warn); }
+    tbody.failing tr.main td, tr.detail td { background: none; }
+    tbody.failing tr { background: rgba(245, 158, 11, 0.06); }
+    tbody tr td:first-child { box-shadow: none !important; }
   }
-  .tile.converting .ring .bar, .tile.fixing .ring .bar { animation: fill 1s linear forwards; }
-  .grid.over .ring .bar { animation-play-state: paused; }
-  @keyframes fill { to { stroke-dashoffset: 0; } }
   .overlay {
-    position: fixed; inset: 0;
-    background: rgba(2, 6, 23, 0.8);
-    display: none; align-items: center; justify-content: center;
-    padding: 16px;
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75);
+    display: none; align-items: center; justify-content: center; padding: 16px;
   }
   .overlay.show { display: flex; }
   .card {
-    background: var(--panel); border-radius: 16px; padding: 22px;
-    width: min(420px, 100%); text-align: center;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 22px; width: min(440px, 100%);
   }
-  .card h2 { margin: 0 0 14px; font-size: 26px; }
-  .card h2.win { color: var(--migrated); }
-  .card h2.lose { color: #f87171; }
-  .card .scores { margin-bottom: 14px; grid-template-columns: repeat(2, 1fr); }
-  .card .summary { margin: 0 0 16px; color: var(--text); line-height: 1.4; }
-  .card button {
-    background: var(--converting); color: #fff; border: 0; border-radius: 10px;
-    font: inherit; font-weight: 700; font-size: 16px; padding: 12px 22px; cursor: pointer;
-  }
-  .card button:hover { filter: brightness(1.1); }
+  .card h2 { margin: 0 0 4px; font-size: 22px; }
+  .card h2.win { color: var(--ok); }
+  .card h2.lose { color: var(--bad); }
+  .card .reason { color: var(--muted); margin: 0 0 14px; }
+  .card dl { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; margin: 0 0 16px; }
+  .card dt { color: var(--muted); }
+  .card dd { margin: 0; text-align: right; color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .card .again { color: var(--muted); font-size: 12px; margin: 0; }
 </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <h1>Cutover</h1>
-    <div class="hint">Tap a grey table to dispatch a Devin &middot; 1&nbsp;ACU</div>
+    <h1>Teradata to Snowflake cutover</h1>
+    <div class="meters" aria-live="polite">
+      <div class="meter" id="acu-meter"><div class="label">ACUs left</div><div class="value" id="acus">20</div></div>
+      <div class="meter" id="clock-meter"><div class="label">Days to Teradata renewal</div><div class="value" id="days">60</div></div>
+    </div>
   </header>
-  <section class="scores" aria-live="polite">
-    <div class="score"><div class="label">Tables migrated</div><div class="value"><span id="migrated">0</span><small>/24</small></div></div>
-    <div class="score"><div class="label">ACUs spent</div><div class="value"><span id="spent">0</span><small>/32</small></div></div>
-    <div class="score"><div class="label">Mismatches fixed</div><div class="value" id="fixed">0</div></div>
-    <div class="score" id="days-box"><div class="label">Days to renewal</div><div class="value" id="days">90</div></div>
-  </section>
-  <main class="grid" id="grid"></main>
+  <p class="hint">Migrate costs 1 ACU. Each fix attempt costs 1 ACU. Reconcile all 8 tables before the renewal.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>TABLE</th>
+          <th class="num">TERADATA ROWS</th>
+          <th class="num">SNOWFLAKE ROWS</th>
+          <th class="num">DELTA</th>
+          <th>STATUS</th>
+          <th>ACTION</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
 </div>
 
-<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="end-headline">
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="end-title">
   <div class="card">
-    <h2 id="end-headline"></h2>
-    <div class="scores">
-      <div class="score"><div class="label">Tables migrated</div><div class="value"><span id="end-migrated">0</span><small>/24</small></div></div>
-      <div class="score"><div class="label">ACUs spent</div><div class="value" id="end-spent">0</div></div>
-      <div class="score"><div class="label">Mismatches fixed</div><div class="value" id="end-fixed">0</div></div>
-      <div class="score"><div class="label">Days to renewal</div><div class="value" id="end-days">0</div></div>
-    </div>
-    <p class="summary" id="end-summary"></p>
-    <button id="play-again" type="button">Play again</button>
+    <h2 id="end-title"></h2>
+    <p class="reason" id="end-reason"></p>
+    <dl>
+      <dt>Tables reconciled</dt><dd id="end-reconciled"></dd>
+      <dt>ACUs spent</dt><dd id="end-spent"></dd>
+      <dt>Wrong fixes</dt><dd id="end-wrong"></dd>
+    </dl>
+    <p class="again">Reload the page to play again.</p>
   </div>
 </div>
 
 <script>
 const TABLES = [
-  'CUSTOMER', 'ORDERS', 'INVOICES', 'CLAIMS', 'INVENTORY', 'GL_ENTRIES',
-  'PAYMENTS', 'PRODUCTS', 'SUPPLIERS', 'SHIPMENTS', 'EMPLOYEES', 'POLICIES',
-  'RETURNS', 'STORES', 'REGIONS', 'CONTRACTS', 'VENDORS', 'WAREHOUSES',
-  'PROMOTIONS', 'CAMPAIGNS', 'TICKETS', 'SESSIONS', 'ADDRESSES', 'PRICE_LISTS'
+  'EDW.CUSTOMER', 'EDW.ACCOUNT', 'EDW.ORDERS', 'EDW.INVOICE',
+  'EDW.PAYMENT', 'EDW.CLAIM', 'EDW.INVENTORY', 'EDW.GL_ENTRY'
 ];
-const FINANCE_TABLES = new Set(['INVOICES', 'PAYMENTS', 'GL_ENTRIES']);
-const STARTING_ACUS = 32;
-const ROUND_DAYS = 90;
-const WORK_MS = 1000;
-const MISMATCH_RATE = 0.2;
-const FINANCE_MISMATCH_RATE = 0.4;
+const STARTING_ACUS = 20;
+const ROUND_SECONDS = 60;
+const FAIL_RATE = 0.5;
+const MIN_ROWS = 100000;
+const MAX_ROWS = 5000000;
 
-const STATUS_TEXT = {
-  legacy: 'Legacy',
-  converting: 'Converting',
-  fixing: 'Fixing',
-  migrated: 'Migrated'
-};
+const ISSUES = [
+  {
+    id: 'set',
+    symptom: 'Snowflake has more rows (+0.03%)',
+    log: 'Teradata SET table silently dropped duplicate rows; Snowflake kept them',
+    fix: 'Dedupe with QUALIFY ROW_NUMBER()',
+    extraRows: true
+  },
+  {
+    id: 'case',
+    symptom: 'Counts match, but WHERE status = \'Active\' returns 0 rows in Snowflake vs 48,112 in Teradata',
+    fix: 'Apply case-insensitive collation'
+  },
+  {
+    id: 'char',
+    symptom: 'Counts match, but JOIN on cust_code drops 12,904 rows; trailing spaces don\'t match',
+    fix: 'RTRIM CHAR columns'
+  },
+  {
+    id: 'decimal',
+    symptom: 'Counts match, but SUM(amount) off by $1,284.17',
+    fix: 'Map DECIMAL(18,2) to NUMBER(18,2), not FLOAT'
+  },
+  {
+    id: 'tz',
+    symptom: 'Counts match, but MAX(updated_at) shifted +5h',
+    fix: 'Load as TIMESTAMP_NTZ in UTC'
+  }
+];
 
-// Optional ?seed=N makes reconciliation outcomes reproducible for testing.
+// Optional ?seed=N makes the round reproducible for testing.
 const random = (() => {
   const seed = new URLSearchParams(location.search).get('seed');
   if (seed === null) return Math.random;
@@ -200,161 +223,199 @@ const random = (() => {
   };
 })();
 
-const gridEl = document.getElementById('grid');
-const overlayEl = document.getElementById('overlay');
-let state;
-let tileEls = [];
+const randInt = (min, max) => min + Math.floor(random() * (max - min + 1));
+const fmt = n => n.toLocaleString('en-US');
 
-function isFinance(tile) {
-  return FINANCE_TABLES.has(tile.name);
+function shuffle(list) {
+  const a = list.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
-function mismatchText(tile) {
-  return isFinance(tile) ? 'Totals don\u2019t tie to the ledger' : 'Row counts don\u2019t match';
-}
+const state = {
+  rows: TABLES.map(name => ({
+    name,
+    tdRows: randInt(MIN_ROWS, MAX_ROWS),
+    sfRows: null,
+    status: 'pending', // pending | reconciled | failing
+    issue: null,
+    options: [],
+    wrongAttempt: false
+  })),
+  acus: STARTING_ACUS,
+  spent: 0,
+  wrongFixes: 0,
+  seconds: ROUND_SECONDS,
+  over: false,
+  clock: null
+};
+
+const rowsEl = document.getElementById('rows');
+const tableEl = rowsEl.parentElement;
 
 function spendAcu() {
-  state.acusLeft -= 1;
-  state.acusSpent += 1;
+  state.acus -= 1;
+  state.spent += 1;
 }
 
-function dispatchDevin(i) {
-  const tile = state.tiles[i];
-  if (state.over || tile.status !== 'legacy' || state.acusLeft <= 0) return;
+function migrate(i) {
+  const row = state.rows[i];
+  if (state.over || row.status !== 'pending' || state.acus <= 0) return;
   spendAcu();
-  tile.status = 'converting';
-  tile.timer = setTimeout(() => reconcile(i), WORK_MS);
+  if (random() < FAIL_RATE) {
+    const issue = ISSUES[Math.floor(random() * ISSUES.length)];
+    const others = shuffle(ISSUES.filter(x => x !== issue)).slice(0, 2);
+    row.issue = issue;
+    row.options = shuffle([issue, ...others]);
+    row.status = 'failing';
+    row.sfRows = issue.extraRows ? row.tdRows + Math.max(1, Math.round(row.tdRows * 0.0003)) : row.tdRows;
+  } else {
+    row.status = 'reconciled';
+    row.sfRows = row.tdRows;
+  }
   render();
+  checkEnd();
 }
 
-function reconcile(i) {
-  const tile = state.tiles[i];
-  tile.timer = null;
-  const failRate = isFinance(tile) ? FINANCE_MISMATCH_RATE : MISMATCH_RATE;
-  tile.status = random() < failRate ? 'mismatch' : 'migrated';
-  render();
-  checkGameOver();
-}
-
-function fixMismatch(i) {
-  const tile = state.tiles[i];
-  if (state.over || tile.status !== 'mismatch' || state.acusLeft <= 0) return;
+function applyFix(i, optionIndex) {
+  const row = state.rows[i];
+  if (state.over || row.status !== 'failing' || state.acus <= 0) return;
   spendAcu();
-  tile.status = 'fixing';
-  tile.timer = setTimeout(() => {
-    tile.timer = null;
-    tile.status = 'migrated';
-    state.fixed += 1;
-    render();
-    checkGameOver();
-  }, WORK_MS);
+  if (row.options[optionIndex] === row.issue) {
+    row.status = 'reconciled';
+    row.sfRows = row.tdRows;
+    row.wrongAttempt = false;
+  } else {
+    row.wrongAttempt = true;
+    state.wrongFixes += 1;
+  }
   render();
+  checkEnd();
 }
 
-function handleTileClick(i) {
-  const status = state.tiles[i].status;
-  if (status === 'legacy') dispatchDevin(i);
-  else if (status === 'mismatch') fixMismatch(i);
+function reconciledCount() {
+  return state.rows.filter(r => r.status === 'reconciled').length;
 }
 
-function migratedCount() {
-  return state.tiles.filter(t => t.status === 'migrated').length;
-}
-
-function devinsWorking() {
-  return state.tiles.some(t => t.status === 'converting' || t.status === 'fixing');
-}
-
-function checkGameOver() {
+function checkEnd() {
   if (state.over) return;
-  if (migratedCount() === TABLES.length) endGame('win');
-  else if (state.days <= 0) endGame('renewal');
-  else if (state.acusLeft <= 0 && !devinsWorking()) endGame('budget');
+  if (reconciledCount() === TABLES.length) endGame(true, 'All 8 tables reconciled in Snowflake.');
+  else if (state.seconds <= 0) endGame(false, 'Teradata renewal hit before every table reconciled.');
+  else if (state.acus <= 0) endGame(false, 'Out of ACUs.');
+}
+
+function endGame(won, reason) {
+  state.over = true;
+  clearInterval(state.clock);
+  render();
+  const title = document.getElementById('end-title');
+  title.textContent = won ? 'Cutover complete' : 'Cutover failed';
+  title.className = won ? 'win' : 'lose';
+  document.getElementById('end-reason').textContent = reason;
+  document.getElementById('end-reconciled').textContent = `${reconciledCount()}/${TABLES.length}`;
+  document.getElementById('end-spent').textContent = state.spent;
+  document.getElementById('end-wrong').textContent = state.wrongFixes;
+  document.getElementById('overlay').classList.add('show');
 }
 
 function tick() {
   if (state.over) return;
-  state.days = Math.max(0, state.days - 1);
+  state.seconds = Math.max(0, state.seconds - 1);
   render();
-  checkGameOver();
+  checkEnd();
 }
 
-function endGame(reason) {
-  state.over = true;
-  clearInterval(state.clock);
-  state.tiles.forEach(t => { clearTimeout(t.timer); t.timer = null; });
-  gridEl.classList.add('over');
+const COLUMNS = ['TABLE', 'TERADATA ROWS', 'SNOWFLAKE ROWS', 'DELTA', 'STATUS', 'ACTION'];
 
-  const headlines = { win: 'Cutover complete', renewal: 'Renewal hit', budget: 'Budget exhausted' };
-  const headline = document.getElementById('end-headline');
-  headline.textContent = headlines[reason];
-  headline.className = reason === 'win' ? 'win' : 'lose';
-  document.getElementById('end-migrated').textContent = migratedCount();
-  document.getElementById('end-spent').textContent = state.acusSpent;
-  document.getElementById('end-fixed').textContent = state.fixed;
-  document.getElementById('end-days').textContent = state.days;
-  document.getElementById('end-summary').textContent = reason === 'win'
-    ? `Migrated 24 tables with ${state.days} days to spare on ${state.acusSpent} ACUs.`
-    : '';
-  overlayEl.classList.add('show');
-  document.getElementById('play-again').focus();
+function cell(text, className) {
+  const td = document.createElement('td');
+  if (className) td.className = className;
+  td.textContent = text;
+  return td;
 }
 
-function buildBoard() {
-  gridEl.innerHTML = '';
-  tileEls = state.tiles.map((tile, i) => {
-    const el = document.createElement('button');
-    el.type = 'button';
-    el.className = 'tile';
-    el.innerHTML =
-      (isFinance(tile) ? '<span class="tag" title="Finance table">$</span>' : '') +
-      '<svg class="ring" viewBox="0 0 32 32" aria-hidden="true">' +
-      '<circle class="track" cx="16" cy="16" r="14"/><circle class="bar" cx="16" cy="16" r="14"/></svg>' +
-      `<span class="name">${tile.name}</span><span class="status"></span>`;
-    el.addEventListener('click', () => handleTileClick(i));
-    gridEl.appendChild(el);
-    return el;
-  });
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function renderRow(row, i) {
+  const body = el('tbody', row.status);
+  const tr = el('tr', 'main');
+  tr.appendChild(cell(row.name, 'name'));
+  tr.appendChild(cell(fmt(row.tdRows), 'num'));
+
+  if (row.sfRows === null) {
+    tr.appendChild(cell('-', 'num dash'));
+    tr.appendChild(cell('-', 'num dash'));
+  } else {
+    const delta = row.sfRows - row.tdRows;
+    tr.appendChild(cell(fmt(row.sfRows), 'num'));
+    tr.appendChild(cell(delta > 0 ? `+${fmt(delta)}` : '0', `num ${delta > 0 ? 'delta-pos' : 'delta-zero'}`));
+  }
+
+  const statusTd = document.createElement('td');
+  const labels = { pending: ['Not migrated', 'pending'], reconciled: ['Reconciled', 'ok'], failing: ['Not reconciled', 'warn'] };
+  const [label, badgeClass] = labels[row.status];
+  statusTd.appendChild(el('span', `badge ${badgeClass}`, label));
+  tr.appendChild(statusTd);
+
+  const actionTd = document.createElement('td');
+  if (row.status === 'pending') {
+    const btn = el('button', 'migrate', 'Migrate');
+    btn.type = 'button';
+    btn.disabled = state.over || state.acus <= 0;
+    btn.setAttribute('aria-label', `Migrate ${row.name} (1 ACU)`);
+    btn.addEventListener('click', () => migrate(i));
+    actionTd.appendChild(btn);
+    actionTd.appendChild(el('span', 'cost', ' 1 ACU'));
+  } else if (row.status === 'failing') {
+    actionTd.appendChild(el('span', 'cost', 'Pick a fix below (1 ACU each)'));
+  } else {
+    actionTd.appendChild(el('span', 'dash', 'Done'));
+  }
+  tr.appendChild(actionTd);
+  [...tr.children].forEach((td, k) => td.setAttribute('data-label', COLUMNS[k]));
+  body.appendChild(tr);
+
+  if (row.status === 'failing') {
+    const detail = el('tr', 'detail');
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    td.appendChild(el('div', 'symptom', row.issue.symptom));
+    if (row.issue.log) td.appendChild(el('div', 'log', row.issue.log));
+    if (row.wrongAttempt) td.appendChild(el('div', 'still', 'Still not reconciled'));
+    const fixes = el('div', 'fixes');
+    row.options.forEach((option, k) => {
+      const btn = el('button', 'fix', option.fix);
+      btn.type = 'button';
+      btn.disabled = state.over || state.acus <= 0;
+      btn.addEventListener('click', () => applyFix(i, k));
+      fixes.appendChild(btn);
+    });
+    td.appendChild(fixes);
+    detail.appendChild(td);
+    body.appendChild(detail);
+  }
+  return body;
 }
 
 function render() {
-  state.tiles.forEach((tile, i) => {
-    const el = tileEls[i];
-    const text = tile.status === 'mismatch' ? mismatchText(tile) : STATUS_TEXT[tile.status];
-    el.className = `tile ${tile.status}`;
-    el.querySelector('.status').textContent = text;
-    el.setAttribute('aria-label', `${tile.name}: ${text}`);
-  });
-  document.getElementById('migrated').textContent = migratedCount();
-  document.getElementById('spent').textContent = state.acusSpent;
-  document.getElementById('fixed').textContent = state.fixed;
-  document.getElementById('days').textContent = state.days;
-  document.getElementById('days-box').classList.toggle('urgent', state.days <= 15);
+  tableEl.querySelectorAll('tbody').forEach(b => b.remove());
+  state.rows.forEach((row, i) => tableEl.appendChild(renderRow(row, i)));
+  document.getElementById('acus').textContent = state.acus;
+  document.getElementById('days').textContent = state.seconds;
+  document.getElementById('acu-meter').classList.toggle('low', state.acus <= 3);
+  document.getElementById('clock-meter').classList.toggle('low', state.seconds <= 10);
 }
 
-function resetGame() {
-  if (state) {
-    clearInterval(state.clock);
-    state.tiles.forEach(t => clearTimeout(t.timer));
-  }
-  state = {
-    tiles: TABLES.map(name => ({ name, status: 'legacy', timer: null })),
-    acusLeft: STARTING_ACUS,
-    acusSpent: 0,
-    fixed: 0,
-    days: ROUND_DAYS,
-    over: false,
-    clock: null
-  };
-  overlayEl.classList.remove('show');
-  gridEl.classList.remove('over');
-  buildBoard();
-  render();
-  state.clock = setInterval(tick, 1000);
-}
-
-document.getElementById('play-again').addEventListener('click', resetGame);
-resetGame();
+render();
+state.clock = setInterval(tick, 1000);
 </script>
 </body>
 </html>
